@@ -5,154 +5,164 @@
 #include <vector>
 #include <sstream>
 
+using namespace std;
+
 class Preprocessor {
 private:
-    std::string inputFileName;
-    std::string outputFileName;
+    string inputFileName;
+    string outputFileName;
 
-    // Подсчёт вхождений подстроки
-    int countOccurrences(const std::string& text, const std::string& pattern) {
+    int countOccurrences(const string& text, const string& pattern) {
         int count = 0;
         size_t pos = 0;
-
-        while ((pos = text.find(pattern, pos)) != std::string::npos) {
+        while ((pos = text.find(pattern, pos)) != string::npos) {
             count++;
             pos += pattern.length();
         }
-
         return count;
     }
 
-    // Проверка на недопустимые символы
-    bool hasInvalidCharacters(const std::string& text) {
-        // Допустимые символы: буквы, цифры, пробелы, знаки пунктуации, операторы
-        std::regex validChars("[a-zA-Z0-9\\s\\t\\n\\r\\{\\}\\(\\)\\[\\]<>;:,\\.\\+\\-\\*/%=!&|\\^~\"'#]");
-
-        for (char c : text) {
-            std::string charStr(1, c);
-            if (!std::regex_match(charStr, validChars)) {
-                std::cout << "Ошибка: обнаружен недопустимый символ '" << c
-                    << "' (код: " << (int)c << ")" << std::endl;
-                return true;
+    string removeBOM(const string& text) {
+        if (text.length() >= 3) {
+            unsigned char c1 = static_cast<unsigned char>(text[0]);
+            unsigned char c2 = static_cast<unsigned char>(text[1]);
+            unsigned char c3 = static_cast<unsigned char>(text[2]);
+            if (c1 == 0xEF && c2 == 0xBB && c3 == 0xBF) {
+                return text.substr(3);
             }
         }
-        return false;
+        return text;
     }
 
-    // Удаление многострочных комментариев
-    std::string removeMultiLineComments(const std::string& code) {
-        // Регулярное выражение для многострочных комментариев
-        // std::regex::ECMAScript | std::regex::optimize для производительности
-        std::regex multiLineComment("/\\*.*?\\*/", std::regex::ECMAScript);
-        return std::regex_replace(code, multiLineComment, "");
+
+    string removeMultiLineComments(const string& code) {
+        regex multiLineComment("/\\*[\\s\\S]*?\\*/");
+        return regex_replace(code, multiLineComment, "");
     }
 
-    // Удаление однострочных комментариев
-    std::string removeSingleLineComments(const std::string& code) {
-        // Регулярное выражение для однострочных комментариев
-        std::regex singleLineComment("//.*$", std::regex::ECMAScript | std::regex::multiline);
-        return std::regex_replace(code, singleLineComment, "");
+
+    string removeSingleLineComments(const string& code) {
+
+        regex singleLineComment("//.*$");
+        istringstream stream(code);
+        string line;
+        string result;
+
+        while (getline(stream, line)) {
+            string cleanedLine = regex_replace(line, singleLineComment, "");
+            result += cleanedLine + "\n";
+        }
+        return result;
     }
 
-    // Нормализация пробелов и удаление пустых строк
-    std::vector<std::string> normalizeWhitespace(const std::string& code) {
-        std::vector<std::string> result;
-        std::istringstream stream(code);
-        std::string line;
 
-        while (std::getline(stream, line)) {
-            // Замена последовательностей пробельных символов на один пробел
-            std::regex whitespace("\\s+");
-            std::string normalized = std::regex_replace(line, whitespace, " ");
+    string removeSingleLineCommentsAlternative(const string& code) {
+        regex singleLineComment("//.*$", regex::ECMAScript);
 
-            // Удаление пробелов в начале и конце строки
-            normalized = std::regex_replace(normalized, std::regex("^\\s+|\\s+$"), "");
+        string result;
+        size_t start = 0;
+        size_t end = 0;
 
-            // Добавляем только непустые строки
-            if (!normalized.empty()) {
-                result.push_back(normalized);
+        while (end < code.length()) {
+            size_t commentStart = code.find("//", start);
+
+            if (commentStart == string::npos) {
+                result += code.substr(start);
+                break;
+            }
+            size_t lineEnd = code.find("\n", commentStart);
+            if (lineEnd == string::npos) {
+                lineEnd = code.length();
+            }
+
+            result += code.substr(start, commentStart - start);
+
+            start = lineEnd;
+            if (start < code.length() && code[start] == '\n') {
+                result += "\n";
+                start++;
             }
         }
 
         return result;
     }
 
+    vector<string> normalizeWhitespace(const string& code) {
+        vector<string> result;
+        istringstream stream(code);
+        string line;
+
+        while (getline(stream, line)) {
+            regex whitespace("\\s+");
+            string normalized = regex_replace(line, whitespace, " ");
+            normalized = regex_replace(normalized, regex("^\\s+|\\s+$"), "");
+            if (!normalized.empty()) {
+                result.push_back(normalized);
+            }
+        }
+        return result;
+    }
+
 public:
-    Preprocessor(const std::string& input, const std::string& output)
+    Preprocessor(const string& input, const string& output)
         : inputFileName(input), outputFileName(output) {}
 
     bool process() {
-        // Чтение входного файла
-        std::ifstream inputFile(inputFileName);
+        ifstream inputFile(inputFileName);
         if (!inputFile.is_open()) {
-            std::cout << "Ошибка: не удалось открыть входной файл " << inputFileName << std::endl;
+            cout << "Error: cannot open input file " << inputFileName << endl;
             return false;
         }
 
-        std::stringstream buffer;
+        stringstream buffer;
         buffer << inputFile.rdbuf();
-        std::string code = buffer.str();
+        string code = buffer.str();
         inputFile.close();
 
-        // Проверка на наличие ошибок
-        bool hasError = false;
+        code = removeBOM(code);
 
-        // 1. Проверка незакрытых многострочных комментариев
         int openComments = countOccurrences(code, "/*");
         int closeComments = countOccurrences(code, "*/");
 
         if (openComments != closeComments) {
-            std::cout << "Ошибка: незакрытый многострочный комментарий" << std::endl;
-            std::cout << "Количество /*: " << openComments << ", */: " << closeComments << std::endl;
-            std::cout << "Файл не будет сохранён." << std::endl;
+            cout << "Error: unclosed multi-line comment" << endl;
+            cout << "Number of /*: " << openComments << ", */: " << closeComments << endl;
+            cout << "File will not be saved." << endl;
             return false;
         }
 
-        // 2. Проверка на недопустимые символы
-        if (hasInvalidCharacters(code)) {
-            std::cout << "Ошибка: обнаружены недопустимые символы" << std::endl;
-            std::cout << "Файл не будет сохранён." << std::endl;
-            return false;
-        }
-
-        // 3. Удаление многострочных комментариев
+       
         code = removeMultiLineComments(code);
 
-        // 4. Удаление однострочных комментариев
+        
         code = removeSingleLineComments(code);
 
-        // 5. Нормализация пробелов и удаление пустых строк
-        std::vector<std::string> cleanedLines = normalizeWhitespace(code);
+        
+        vector<string> cleanedLines = normalizeWhitespace(code);
 
-        // Запись результата
-        std::ofstream outputFile(outputFileName);
+        ofstream outputFile(outputFileName);
         if (!outputFile.is_open()) {
-            std::cout << "Ошибка: не удалось создать выходной файл " << outputFileName << std::endl;
+            cout << "Error: cannot create output file " << outputFileName << endl;
             return false;
         }
 
         for (const auto& line : cleanedLines) {
-            outputFile << line << std::endl;
+            outputFile << line << endl;
         }
         outputFile.close();
 
-        // Вывод информационных сообщений
-        std::cout << "Файл успешно обработан." << std::endl;
-        std::cout << "Результат сохранён в: " << outputFileName << std::endl;
-        std::cout << "Удалено комментариев: " << (openComments + closeComments) << std::endl;
-        std::cout << "Исходный размер: " << code.length() << " символов" << std::endl;
-        std::cout << "Ошибок не выявлено" << std::endl;
+        cout << "File successfully processed." << endl;
+        cout << "Result saved to: " << outputFileName << endl;
+        cout << "No errors detected." << endl;
 
         return true;
     }
 };
 
 int main(int argc, char* argv[]) {
-    // Настройка имён файлов
-    std::string inputFile = "test.cpp";
-    std::string outputFile = "test_cleaned.cpp";
+    string inputFile = "test.cpp";
+    string outputFile = "test_cleaned.cpp";
 
-    // Поддержка аргументов командной строки
     if (argc >= 2) {
         inputFile = argv[1];
     }
@@ -160,18 +170,18 @@ int main(int argc, char* argv[]) {
         outputFile = argv[2];
     }
 
-    std::cout << "=== Препроцессор для очистки исходного кода ===" << std::endl;
-    std::cout << "Входной файл: " << inputFile << std::endl;
-    std::cout << "Выходной файл: " << outputFile << std::endl;
-    std::cout << std::endl;
+    cout << "=== Preprocessor for Source Code Cleaning ===" << endl;
+    cout << "Input file: " << inputFile << endl;
+    cout << "Output file: " << outputFile << endl;
+    cout << endl;
 
     Preprocessor preprocessor(inputFile, outputFile);
 
     if (!preprocessor.process()) {
-        std::cout << "Обработка завершена с ошибками." << std::endl;
+        cout << "Processing completed with errors." << endl;
         return 1;
     }
 
-    std::cout << std::endl << "Обработка успешно завершена." << std::endl;
+    cout << endl << "Processing completed successfully." << endl;
     return 0;
 }
